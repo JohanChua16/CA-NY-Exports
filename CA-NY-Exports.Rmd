@@ -1,0 +1,320 @@
+---
+title: "Analyzing California and New York State Exports with ARIMA and VAR Models"
+author: "Johan Chua, Nicholas Delianedis, Grace Pham"
+date: "`r format(Sys.Date(), '%D')`"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 3
+  html_document:
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+    code_folding: show
+---
+
+```{r setup, include = FALSE, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(ggplot2)
+library(ggfortify)
+library(knitr)
+library(dynlm)
+library(jtools)
+library(quantmod)
+library(xts)
+library(ggplot2)
+library(dplyr)
+library(forecast)
+library(fable)
+library(vars)
+```
+
+\newpage
+
+# I Introduction
+In this project, we model and forecast the exports of goods for New York and California using ARIMA in addition to analyzing causality with VAR. These two datasets contain monthly data, from August 1995 through September 2023, on the exports of manufactured and non-manufactured commodities based on origin of movement in millions of dollars. Analyzing and measuring the export levels of each state is significant as exports help facilitate international trade and stimulate economic activity. Since California and New York are two of the top three states with the highest GDP, we thought it would be beneficial to investigate these states’ data in greater detail. Forecasting the exports will be beneficial in examining the future economic climates and help in creating meaningful economic policies in each state.
+
+# II Results
+```{r}
+ca <- read.csv("CAEX.csv") # load in CA data
+ny <- read.csv("NYEX.csv") # load in NY data
+ca_ts <- ts(ca[,2], start = c(1995, 8), frequency = 12) # convert CA to time series
+ny_ts <- ts(ny[,2], start = c(1995, 8), frequency = 12) # convert NY to time series
+```
+
+### (a) Time-Series Plot, ACF and PACF
+```{r}
+tsdisplay(ca_ts) # Plot/ACF/PACF of CA Exports
+tsdisplay(ny_ts) # Plot/ACF/PACF of NY Exports
+```
+
+### (b) STL Decomposition Plots
+```{r}
+plot(stl(ca_ts, s.window="periodic")) # stl decomposition plot of CA
+plot(stl(ny_ts, s.window="periodic")) # stl decomposition plot of NY
+```
+
+For these decompositions, we see that there is a very significant upward trend in both, as shown by the graphs here and their small confidence interval bar, showing that they have real overall movement.  In both plots, we see a strong seasonal component, that, while existing mostly within the confidence interval, seems to explain some components of both datasets.  Finally, in the remainder plots, we can see that, in the California plot, most of the remainder is noise, with only a couple strong outliers, most notably near 2008 and 2020, while in the New York plot, we see many more bars outside of the confidence interval band, especially after 2020.
+
+### (c) Model with Trend, Seasonality and Cycles
+
+```{r, out.width = "80%"}
+# time dummy variable
+t <- seq(1995.66, 2023.75, length = length(ca_ts))
+
+# CA trend
+m1_ca <- lm(ca_ts ~ t)
+plot(ca_ts, ylab = "CA Exports (million USD)", xlab = "Time", lwd = 2, col = 'skyblue3')
+lines(t, m1_ca$fit, col = "red3", lwd = 2, lty = 2)
+
+# CA trend + seasonality
+m2_ca <- tslm(ca_ts ~ trend + season)
+plot(ca_ts, ylab = "CA Exports (million USD)", xlab = "Time", lwd = 2, col = 'skyblue3')
+lines(t, m2_ca$fit, col="red3", lwd = 2, lty = 2)
+
+# CA trend + seasonality + cycles
+acf(m2_ca$res,lag=36,main="Residual Sample Autocorrelations",xlab="Displacement")
+pacf(m2_ca$res,lag=36,main="Residual Sample Partial Autocorrelations", xlab="Displacement")
+
+## check for seasonal ARMA
+acf(diff(ca_ts,12),lag=360,main="Residual Sample Autocorrelations",xlab="Displacement")
+pacf(diff(ca_ts,12),lag=360,main="Residual Sample Partial Autocorrelations", xlab="Displacement")
+
+## final model
+m3_ca <- arima(ca_ts, order = c(2,0,0), xreg = c(t), season = list(order = c(0,0,1)))
+plot(ca_ts, ylab = "CA Exports (million USD)", xlab = "Time", lwd = 2, col = 'skyblue3')
+lines(t, fitted(m3_ca), col="red3", lwd = 2, lty = 2)
+```
+
+```{r, out.width = "80%"}
+# NY trend
+m1_ny <- lm(ny_ts ~ t)
+plot(ny_ts, ylab = "NY Exports (million USD)", xlab = "Time", lwd = 2, col = 'skyblue3')
+lines(t, m1_ny$fit, col = "red3", lwd = 2, lty = 2)
+
+# NY trend + seasonality
+m2_ny <- tslm(ny_ts ~ trend + season)
+plot(ny_ts, ylab = "NY Exports (million USD)", xlab = "Time", lwd = 2, col = 'skyblue3')
+lines(t, m2_ny$fit, col="red3", lwd = 2, lty = 2)
+
+# NY trend + seasonality + cycles
+acf(m2_ny$res,lag=36,main="Residual Sample Autocorrelations",xlab="Displacement")
+pacf(m2_ny$res,lag=36,main="Residual Sample Partial Autocorrelations", xlab="Displacement")
+
+## check for seasonal ARMA
+acf(diff(ny_ts,12),lag=360,main="Residual Sample Autocorrelations",xlab="Displacement")
+pacf(diff(ny_ts,12),lag=360,main="Residual Sample Partial Autocorrelations", xlab="Displacement")
+
+## final model
+m3_ny <- arima(ny_ts, order = c(3,0,0), xreg = c(t), season = list(order = c(1,0,1)))
+plot(ny_ts, ylab = "NY Exports (million USD)", xlab = "Time", lwd = 2, col = 'skyblue3')
+lines(t, fitted(m3_ny), col="red3", lwd = 2, lty = 2)
+```
+
+To start our model, we used a linear trend on the data, since the data seemed to most closely follow a linear pattern.  Then, after looking at the ACF and PACF graphs for both detrended datasets, we found that the California dataset exhibited a seasonal AR(1) pattern, while the New York dataset exhibited a seasonal ARMA(1,1) pattern after looking at lags spaced 12 apart, since this is monthly data.  Finally, to model cycles, we again looked at the ACF and PACF graphs of the two datasets, and concluded that, for the California data, an AR(2) model was best suited for the data, while for the New York data, an AR(3) model was optimal.
+
+### (e) Residual vs Fitted
+```{r}
+plot(m3_ca$residuals, main = "TSC Model Residual Plot for CA Exports") # CA
+plot(m3_ny$residuals, main = "TSC Model Residual Plot for NY Exports") # NY
+```
+
+We plot the respective residuals vs. the fitted values for California and New York exports. For California, the variance is not constant and seems to slightly increase. There are a couple significant outliers very far from 0. The residual plot for New York seems to have an even greater variance and obvious increase in the errors. There are also many outliers.  Since the residual plots do not resemble white noise, we can suggest further differencing or taking the log of the data to make the residuals covariance stationary. 
+
+### (f) ACF and PACF of Residuals
+```{r}
+tsdisplay(m3_ca$residuals) # ACF and PACF for CA
+tsdisplay(m3_ny$residuals) # ACF and PACF for NY
+```
+
+We plot the ACF and PACF of the respective residuals for California and New York. There still seems to be a few statistically significant spikes. This suggests that our final model still needs improvements. We can perform a further formal statistical test to confirm whether or not the spikes are actually significant.
+
+\newpage
+
+### (g) CUSUM
+```{r, out.width = "80%"}
+plot(efp(m3_ca$res~1, type = "Rec-CUSUM"), main = "CUSUM for CA") # CUSUM for CA
+plot(efp(m3_ny$res~1, type = "Rec-CUSUM"), main = "CUSUM for NY") # CUSUM for NY
+```
+
+From the CUSUM plots for the models for both datasets, we can see that there are no structural breaks, as the errors do not go outside or even get near the red lines in each, so the model seems to function well at all time intervals.
+
+\newpage
+
+### (h) Diagnostic Statistics
+```{r}
+MAPE(.resid = m3_ca$resid, .actual = ca_ts) # MAPE for CA
+RMSE(.resid = m3_ca$resid, .actual = ca_ts) # RMSE for CA
+MSE(.resid = m3_ca$resid, .actual = ca_ts) # MSE for CA
+MAPE(.resid = m3_ny$resid, .actual = ny_ts) # MAPE for NY
+RMSE(.resid = m3_ny$resid, .actual = ny_ts) # RMSE for NY
+MSE(.resid = m3_ny$resid, .actual = ny_ts) # MSE for NY
+```
+
+For the diagnostic statistics, we can see that the MAPE, or the mean absolute percentage error, is around 5% for the California model, and 8% for the New York model, which are decent results, but it shows that we could improve both of our models, but especially the New York model.  Similarly, the RMSE, or root mean square error, is around the 600-700 range for both models, which indicates that we could improve both models to lower that value.
+
+### (i) 12-Steps Ahead Forecast
+```{r, warning = FALSE}
+m4_ca <- Arima(ca_ts, order = c(2,0,0), include.drift = TRUE, 
+               season = list(order = c(0,0,1))) # CA alternate arima model
+m4_ny <- Arima(ny_ts, order = c(3,0,0), include.drift = TRUE, 
+               season = list(order = c(1,0,1))) # NY alternate arima model
+plot(forecast(m4_ca, n.ahead = 12), main = "Plot of Data, Respective Fit, and Forecast for CA")
+plot(forecast(m4_ny, n.ahead = 12), main = "Plot of Data, Respective Fit, and Forecast for NY")
+```
+
+\newpage
+
+### (j) Compare to Auto.Arima
+```{r, warning = FALSE, out.width="75%"}
+# Comparing Forecasts for CA
+plot(forecast(m4_ca, n.ahead = 12), main = "Manual Model Forecast for CA") # CA Manual
+plot(forecast(auto.arima(ca_ts), n.ahead=12), 
+     main = "auto.arima Model Forecast for CA") # CA auto.arima
+```
+
+For California exports, our two models have different forecasts. Our manual model's forecast is overall more optimistic, and loses its seasonality and cyclic patterns as time increases. On the other hand, the auto.arima model's forecast is very conservative. The trend is completely straight, predicting that exports will—on average—remain at the level that they currently are at. Looking at the error bars, we find that our model's forecast has smaller error bars, whereas the error bars for the auto.arima model's forecast are exponentially increasing in size. This indicates that the auto.arima model's prediction carries more uncertainty than that from our manual model.
+
+```{r, warning = FALSE, out.width="80%"}
+# Comparing Forecasts for NY
+plot(forecast(m4_ny, n.ahead = 12), main = "Manual Model Forecast for NY") # NY Manual
+plot(forecast(auto.arima(ny_ts), n.ahead=12), 
+     main = "auto.arima Model Forecast for NY") # NY auto.arima
+```
+
+For New York exports, the two model's respective forecasts are more similar. They both predict a straight line trend, with exports staying on average at the level they are currently at. The main difference is that the auto-arima model's forecast loses seasonality and cycles as the forecast gets further into the future. In terms of error bars, our manual model has narrower confidence intervals that stay around the same size. The auto.arima error bars increase in width overtime, indicating increasing uncertainty as time goes on. 
+
+\newpage
+
+```{r}
+# Comparing MAPE for CA
+MAPE(m3_ca$resid, ca_ts) # manual model
+MAPE(auto.arima(ca_ts)$resid, ca_ts) # auto.arima
+
+# Comparing MAPE for NY
+MAPE(m3_ny$resid, ny_ts) # manual model
+MAPE(auto.arima(ny_ts)$resid, ny_ts) # auto.arima
+```
+
+For California, the auto.arima model performs better as it has a lower MAPE of 3.999594 compared to an MAPE of 4.800544 for our manual model. This means that the auto.arima model is more accurate than ours.
+
+On the other hand, our model outperforms auto.arima for the New York series with an MAPE of 8.028586 compared to auto.arima's 8.870101. This indicates that our model is more accurate than auto.arima, as determined by MAPE.
+
+
+### (k) Combination Forecast
+```{r, warning = FALSE, out.width="60%"}
+# combining 4 forecasts
+combined_forecast <- (data.frame(forecast(m4_ca, n.ahead = 12)) + 
+                      data.frame(forecast(m4_ny, n.ahead = 12)) + 
+                      data.frame(forecast(auto.arima(ca_ts), n.ahead = 12)) + 
+                      data.frame(forecast(auto.arima(ny_ts), n.ahead = 12)))/4
+# plotting combined forecast
+plot(combined_forecast[,1], main = "Combined Forecast") + lines(combined_forecast[,1])
+
+# MAPE for combined forecast (by averaging residuals and comparing to combined CA/NY series)
+avgres <- (m3_ca$resid + auto.arima(ca_ts)$resid + m3_ny$resid + auto.arima(ny_ts)$resid)/4
+MAPE(avgres, ca_ts + ny_ts)
+```
+
+Combining the forecasts, we achieve an MAPE of 2.300376 Comparing this to the individual models, we find that
+
+- auto.arima for CA performs worse than the combined forecast
+- manual model for CA performs worse with combined forecast
+- auto.arima for NY performs worse than the combined forecast
+- manual model for NY performs worse than the combined forecast.
+
+### (l) VAR Model
+```{r, error = TRUE, warning = FALSE}
+# creating VAR model
+y <- cbind(ca_ts, ny_ts)
+VARselect(y)$selection
+y_tot <- data.frame(y)
+y_model <- VAR(y_tot, p=10)
+
+kable(summary(y_model)$varresult$ca_ts$coefficients) # CA
+kable(summary(y_model)$varresult$ny_ts$coefficients) # NY
+```
+
+```{r, error = TRUE}
+# plot of VAR model
+plot(y_model, names="ca_ts") # CA
+```
+
+```{r, error = TRUE}
+plot(y_model, names="ny_ts") # NY
+```
+
+```{r, error = TRUE}
+acf(residuals(y_model)[,1]) # ACF for CA
+```
+
+```{r, error = TRUE}
+pacf(residuals(y_model)[,1]) # PACF for CA
+```
+
+```{r, error = TRUE}
+acf(residuals(y_model)[,2]) # ACF for NY
+```
+
+```{r, error = TRUE}
+pacf(residuals(y_model)[,2])  # PACF for NY
+```
+
+In the VAR fitted model for California, we can see that our model fit is fairly accurate as the fitted values and the original data are closely aligned with one another.  Similarly the VAR fitted model for New York also yields a fairly accurate fit. The observed values seemed to be slightly lagged in comparison to the fitted values, but they are still strongly associated. The residual plots for both states showed very similar results to the final ARIMA model we previously fitted, which had significant outliers and was non-stationary, suggesting we should fit the VAR model to differenced data in the future. 
+
+To further access the VAR model, we can look at the ACF and PACF plots. For California, The ACF plot shows a significant spike at lags 12 and 24 which suggests that seasonal behavior was not captured by the model. For New York, the ACF and PACF show a spike at lag 12 and there are some potentially significant spikes at other lags throughout the rest of the data.  These spikes could indicate seasonal behavior not captured by the model. We suggest further adding a seasonal AR component to improve the model’s ability to capture and represent the underlying seasonal patterns.
+
+\newpage
+
+### (m) Impulse Response Functions
+```{r, out.width = "40%"}
+kable(data.frame(irf(y_model)$irf$ca_ts, irf(y_model)$irf$ny_ts)) # IRF coefficients
+kable(data.frame(irf(y_model)$Lower$ca_ts, irf(y_model)$Lower$ny_ts)) # Lower CI Bound
+```
+
+```{r, out.width="50%"}
+kable(data.frame(irf(y_model)$Upper$ca_ts, irf(y_model)$Upper$ny_ts)) # Upper CI Bound
+```
+
+\newpage
+
+```{r, out.width="50%"}
+plot(irf(y_model, n.ahead=36))
+```
+The first pair of plots show the response to a unit shock in California exports. We can see that it is highly persistent and turns insignificant after 3 months. We see an initial positive effect on both California and New York exports; however, the effect on California exports is much more significant (which makes sense).  The impulse response slowly declines after the third month. 
+
+The second pair of plots shows the response to a unit shock in New York exports. We see the shock caused a significant initial positive effect on New York exports but a small negative effect on California exports. The impulse response declines towards zero after the second month in both states, but the decline is seemingly much slower in California.  
+
+### (n) Granger-Causality Test
+```{r}
+grangertest(ca_ts ~ ny_ts, order = 10)
+grangertest(ny_ts ~ ca_ts, order = 10)
+```
+
+In the first Granger causality test, we are testing if New York exports Granger cause California exports. Since the p-value is 0.007458, we reject the null hypothesis at the 0.05 significance level. This suggests that New York exports can be used to predict California exports.
+
+In the second Granger causality test, we are testing if California exports Granger cause New York exports. Since the p-value is 0.0009205, we reject the null hypothesis at the 0.05 significance level. This suggests the California exports can be used to predict New York exports. We observe  that the second Granger test yields a more significant p-value compared to the first test. This implies that California exports have a more pronounced impact than New York exports in forecasting future export values.
+
+### (o) VAR Model Forecast
+```{r}
+plot(predict(object=y_model, n.ahead=52))
+```
+
+Compared to the models we forecasted with in part (i), we see that these forecasts expect a more neutral or even slightly downward trend from both datasets, while the other forecasts predicted a more steady upward trend, especially for the California forecast.  We also see that these trends do not have any seasonal component since they are very flat, while the other forecasts had a strong seasonal component in the predictions.
+
+\newpage
+
+# III Conclusions and Future Work
+In our project, we fit four models to forecast exports in California and New York. We first fit a model that included trend, seasonality, and cyclical components. We used a linear trend on the data and using the ACF and PACF plots, we concluded the California dataset exhibited a seasonal AR(1) pattern and an AR(2) model was optimal to model cycles. For New York, we concluded the dataset exhibited a seasonal ARMA(1,1) pattern and an AR(3) model was optimal to model cycles. The second model we fit was an ARIMA model using  auto.arima. The ARIMA model for California was an ARIMA(2,1,0)(2,0,0)[12]  and for New York it was ARIMA(0,1,2)(0,0,1)[12].  In terms of MAPE, for California we concluded that the auto.arima model performs better as it has a lower MAPE compared to the manual model. And for New York, our model outperforms auto.arima since it has a lower MAPE. The third model we fit was a combined model using the previous two models. Comparing this model to the previous two models, we obtain an MAPE of 4.800544. We conclude that for California, the ARIMA model performs better and the manual model performs similarly to the combined forecast. However, for New York, the combined model performs better than the ARIMA and manual model. Lastly we fit a VAR model of order 10. It yielded a fairly accurate fit for both datasets having a very slight lag. We suggest adding a seasonal component after viewing the ACF/PACF plots and seeing that the forecast showed a flat trend. The Granger causality tests suggested that California exports cause New York exports and vice versa. However, California exports have a more significant effect. To improve our forecasts we can apply advanced techniques such as ets. Reevaluating and updating our model periodically would also be beneficial for future work forecasting exports in California and New York, in order to better understand California and New York state markets in addition to the US market as a whole.
+
+# IV References
+
+U.S. Census Bureau, Exports of Goods for New York [EXPTOTNY], retrieved from FRED, Federal Reserve Bank of St. Louis; https://fred.stlouisfed.org/series/EXPTOTNY, November 16, 2023.
+
+U.S. Census Bureau, Exports of Goods for California [EXPTOTCA], retrieved from FRED, Federal Reserve Bank of St. Louis; https://fred.stlouisfed.org/series/EXPTOTCA, November 16, 2023.
+
+
+
+
+
+
